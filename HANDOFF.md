@@ -33,6 +33,18 @@ Owner's defaults: home ZIP 34951, max travel 80 mi. These must stay user-editabl
 - End-to-end check with the real extension in headless Chrome: the panel renders on the listing, and the
   results page shows 24 badges, the filter bar and the "N hidden" count.
 
+**v0.1.2: bid controls verified signed in (2026-11-20, web session in the owner's Chrome)**
+- `SEL.bidInput` `#bid-box-input-bid-amount`, `SEL.bidButton` `#btnPostBid` (an `<a>`, so the old
+  button-only fallback missed it), `SEL.confirmButton` `#btnAcceptbid` (hidden in `#onlineAuctionBidBox`
+  until Bid Now), `SEL.autoBid` `#isAutoBid` (checked by default).
+- `findConfirm()` returns the confirm button only once visible. `placeBid()` reports failure if Accept Bid
+  never appears, and the "Bid placed" notification says when Autobid was on.
+- Results: "Free" cards have plain `p.card-amount` with no `name` attr, so `resultPrice`/`resultLocation`
+  now list class fallbacks; Free = $0. The ZIP is read only from the location line, never the whole card
+  (lot numbers look like ZIPs). Live `/en/closing-today`: 24/24 cards with price and location, 0 fake ZIPs.
+- `cost.js`: city lookups retry with St./Ft./Mt. spelled out (zippopotam needs "port saint lucie").
+- Click sequence (type amount → Bid Now → Accept Bid) passes on a mock of the live markup. No real bid placed.
+
 How it was tested (reusable): branded Chrome 137+ ignores `--load-extension`. Launch Chrome with
 `--headless=new --remote-debugging-pipe --enable-unsafe-extension-debugging`, then send the CDP command
 `Extensions.loadUnpacked {path}`, open the page and `Runtime.evaluate`. Harness scripts were in the
@@ -40,19 +52,19 @@ session scratchpad, not committed.
 
 ## Current blockers
 
-1. **Bid flow untested.** The bid box only appears when signed in. `SEL.bidInput`, `bidButton` and
-   `confirmButton` are still `null` and fall back to guesses in `findBidControls()` / `findConfirm()`.
-2. **Background checks untested** (outbid and saved-search alerts). The parsers they use now work.
-3. Only grid view is verified. If GovDeals has a list view toggle, check that `.card-search` still matches.
+1. **No real bid placed yet.** Selectors are verified; needs the owner's OK and a cheap item.
+2. **Autobid decision.** `#isAutoBid` is checked by default, so a scheduled bid becomes a proxy max bid.
+   Ask the owner whether GavelHawk should leave it or uncheck it for exact-amount bids.
+3. **Background checks untested** (outbid and saved-search alerts). The parsers they use now work.
+4. Only grid view is verified. If GovDeals has a list view toggle, check that `.card-search` still matches.
 
 ## Next steps
 
 1. Load the extension: `chrome://extensions` → Developer mode → **Load unpacked** → repo root.
    After any code change, click the reload icon on the extension card and refresh the GovDeals tab.
-2. Bid flow (needs the owner signed in, in a real browser): on a cheap listing, in DevTools choose
-   the GavelHawk content-script context and run `GHParse.findBidControls()`. Confirm `input` and `button`
-   are the real elements, then set `SEL.bidInput`, `SEL.bidButton` and `SEL.confirmButton`. Then schedule a
-   real low bid 2 min out from the popup and watch it fire. Only bid what the owner agrees to spend.
+2. Real bid test, only with the owner's explicit OK on item and amount: open the popup on a cheap
+   listing, schedule the minimum bid 2 min out, watch the tab do Bid Now → Accept Bid, and check the
+   notification. If GovDeals shows any extra step, add its selector to `SEL`.
 3. Background checks: watch an item with a "My bid" below the current price, then click
    **Check now** in the dashboard. Expect an "Outbid" notification. Save a search and confirm
    a second check notifies only on new listings.
@@ -71,7 +83,7 @@ session scratchpad, not committed.
 | `src/dashboard/dashboard.js` | Watchlist, searches, bids, notes, settings, export/import |
 
 Storage (`chrome.storage.local`): `settings`, `watchlist{key}`, `searches{id}`, `notes{key}`,
-`bids{bid-*}`, `zipCache`. `listingKey` = `<account>-<asset>` from `/asset/<account>/<asset>`.
+`bids{bid-*}`, `zipCache` (keyed by ZIP or `st/city` path). `listingKey` = `<account>-<asset>` from `/asset/<account>/<asset>`.
 Worker tab ids live in `chrome.storage.session.workerTabs`; content.js skips its UI in those tabs.
 
 ## Notes

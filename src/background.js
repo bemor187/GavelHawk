@@ -162,7 +162,8 @@ async function fireBid(alarmId) {
   const tab = await chrome.tabs.create({ url: b.url, active: true });
   await waitLoaded(tab.id);
   const res = await ask(tab.id, { type: "placeBid", amount: b.amount });
-  if (res?.ok) notify("Bid placed", `${money(b.amount)} on ${b.title || "listing"}`, b.url);
+  if (res?.ok) notify("Bid placed", `${money(b.amount)} on ${b.title || "listing"}` +
+    (res.autoBid ? " (as Autobid max)" : ""), b.url);
   else notify("Bid FAILED", (res && res.error) || "Couldn't reach the page. Are you logged in?", b.url);
 }
 

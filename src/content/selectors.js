@@ -14,16 +14,17 @@
     location: "#lnkAssetDetailLocation",          // "Winona, Minnesota, USA" (no ZIP)
     address: "#seller_information a[href*='maps.google']", // street address with ZIP
     premium: "#lblBuyerPremium",                  // data-value="12.5"
-    // bid controls: only shown when signed in, not yet verified
-    bidInput: null,       // the bid amount box
-    bidButton: null,      // "Place Bid" button
-    confirmButton: null,  // button in the confirm dialog, if any
+    // bid controls: verified signed in, 2026-11-20 (web session)
+    bidInput: "#bid-box-input-bid-amount",        // "Enter Bid Amount"
+    bidButton: "#btnPostBid",                     // "Bid Now": an <a>, not a <button>
+    confirmButton: "#btnAcceptbid",               // "Accept Bid", hidden until Bid Now is clicked
+    autoBid: "#isAutoBid",                        // GovDeals proxy bidding, checked by default
     // search results (grid view)
     resultCard: ".card-search",
     resultExclude: ".swiper",                     // featured carousels reuse the card markup
     resultTitle: "a.link-click",                  // title attr holds the untruncated title
-    resultPrice: "[name=pAssetCurrentBid]",       // title="275", text "USD 275.00"
-    resultLocation: "[name=pAssetLocation]",      // "Nashville , Tennessee, USA" (no ZIP)
+    resultPrice: "[name=pAssetCurrentBid], p.card-amount",  // title="275", "USD 275.00"; "Free" has no name attr
+    resultLocation: "[name=pAssetLocation], p.card-grey",   // "Nashville , Tennessee, USA" (no ZIP)
     resultEndsAt: "app-ux-timer"
   };
 
@@ -123,13 +124,15 @@
         url: a.href.split("#")[0],
         title: ((titleEl && (titleEl.getAttribute("title") || text(titleEl))) ||
           text(card.querySelector("h2,h3,h4,h5")) || text(a)).slice(0, 140),
-        price: priceEl ? num(priceEl.getAttribute("title") || text(priceEl))
-          : num((t.match(/\$\s*[\d,]+(\.\d+)?/) || [])[0] || ""),
+        price: priceEl ? (/^\s*free\s*$/i.test(text(priceEl)) ? 0 : num(priceEl.getAttribute("title") || text(priceEl)))
+          : num((t.match(/(\$|USD|CAD)\s*[\d,]+(\.\d+)?/) || [])[0]?.replace(/^(USD|CAD)/, "") || ""),
+        currency: /CAD/.test(text(priceEl)) ? "CAD" : "USD",
         endsAt: parseWhen(text(q(SEL.resultEndsAt))),
         location: loc,
         // Cards carry no ZIP. Read one only from the location line, never the
         // whole card: lot numbers like "25917-1" look like ZIPs.
-        zip: zipIn(loc || (locEl ? "" : t)),
+        // Never fall back to the whole card text: lot numbers look like ZIPs.
+        zip: loc ? zipIn(loc) : null,
         pickupOnly: LABELS.pickupOnly.some((p) => p.test(t))
       });
     }
@@ -154,13 +157,18 @@
       [...document.querySelectorAll("input")].find((i) =>
         /bid/i.test([i.id, i.name, i.placeholder, i.getAttribute("aria-label")].join(" ")) && i.type !== "hidden");
     const button = (SEL.bidButton && document.querySelector(SEL.bidButton)) ||
-      [...document.querySelectorAll("button, input[type=submit]")].find((b) => /place\s*bid|bid\s*now|submit\s*bid/i.test(text(b) || b.value));
+      [...document.querySelectorAll("button, a, input[type=submit]")].find((b) => /^(place\s*bid|bid\s*now|submit\s*bid)$/i.test(text(b) || b.value));
     return { input, button };
   }
 
+  const isVisible = (el) => !!(el && (el.offsetParent || el.getClientRects().length));
+
+  // Only returns the confirm button once it is on screen: #btnAcceptbid sits
+  // hidden in the bid box until Bid Now is clicked.
   function findConfirm() {
-    return (SEL.confirmButton && document.querySelector(SEL.confirmButton)) ||
-      [...document.querySelectorAll("[role=dialog] button, .modal button, mat-dialog-container button")]
+    const exact = SEL.confirmButton && document.querySelector(SEL.confirmButton);
+    if (exact) return isVisible(exact) ? exact : null;
+    return [...document.querySelectorAll("[role=dialog] button, .modal button, mat-dialog-container button")]
         .find((b) => /confirm|yes|place\s*bid|submit/i.test(text(b)));
   }
 

@@ -38,10 +38,13 @@
     c.input.dispatchEvent(new Event("input", { bubbles: true }));
     c.input.dispatchEvent(new Event("change", { bubbles: true }));
     await sleep(300);
+    const auto = GHParse.SEL.autoBid && document.querySelector(GHParse.SEL.autoBid);
     c.button.click();
-    const confirm = await waitFor(findConfirm, 5000);
-    if (confirm) { confirm.click(); await sleep(1500); }
-    return { ok: true, confirmed: !!confirm };
+    const confirm = await waitFor(findConfirm, 8000);
+    if (!confirm) return { ok: false, error: "Clicked Bid Now but no Accept Bid step appeared. Bid NOT confirmed; check the tab." };
+    confirm.click();
+    await sleep(2000);
+    return { ok: true, confirmed: true, autoBid: auto ? auto.checked : null };
   }
 
   // ---------- listing page panel ----------

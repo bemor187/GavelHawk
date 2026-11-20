@@ -68,14 +68,20 @@
     if (!path) return null;
     const { zipCache = {} } = await chrome.storage.local.get("zipCache");
     if (zipCache[path]) return zipCache[path];
-    try {
-      const r = await fetch(`https://api.zippopotam.us/us/${path}`);
-      if (!r.ok) return null;
-      const p = (await r.json()).places[0];
-      zipCache[path] = { lat: +p.latitude, lon: +p.longitude };
-      await chrome.storage.local.set({ zipCache });
-      return zipCache[path];
-    } catch { return null; }
+    // "Port St. Lucie" only resolves as "Port Saint Lucie", so try a spelled-out form too.
+    const long = { st: "saint", ft: "fort", mt: "mount" };
+    const spelled = path.replace(/(\/|%20)(st|ft|mt)(\.|%2E)?(?=%20)/gi, (_, pre, w) => pre + long[w.toLowerCase()]);
+    for (const tryPath of [...new Set([path, spelled])]) {
+      try {
+        const r = await fetch(`https://api.zippopotam.us/us/${tryPath}`);
+        if (!r.ok) continue;
+        const p = (await r.json()).places[0];
+        zipCache[path] = { lat: +p.latitude, lon: +p.longitude };
+        await chrome.storage.local.set({ zipCache });
+        return zipCache[path];
+      } catch {}
+    }
+    return null;
   }
 
   // Each argument is a ZIP or a "City, State" string.
