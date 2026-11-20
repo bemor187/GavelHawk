@@ -1,0 +1,20 @@
+#gh-panel, #gh-bar { font: 13px/1.35 system-ui, -apple-system, Segoe UI, sans-serif; color: #1b1f24; z-index: 2147483000; }
+#gh-panel { position: fixed; right: 16px; bottom: 16px; width: 260px; background: #fff; border: 1px solid #d6dbe1; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.15); overflow: hidden; }
+#gh-panel .gh-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #14324a; color: #fff; }
+#gh-panel .gh-x { background: none; border: 0; color: #fff; font-size: 16px; cursor: pointer; }
+#gh-panel.gh-min .gh-body { display: none; }
+#gh-panel .gh-body { padding: 10px; display: grid; gap: 8px; }
+#gh-panel .gh-total { font-size: 22px; font-weight: 700; color: #14324a; }
+#gh-panel .gh-total span { font-size: 12px; font-weight: 400; color: #5b6570; }
+#gh-panel .gh-rows { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; color: #3a434c; }
+#gh-panel .gh-rows div:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+#gh-panel .gh-warn { background: #fff3e0; color: #8a4b00; padding: 4px 6px; border-radius: 6px; }
+#gh-panel .gh-line { display: flex; gap: 6px; }
+#gh-panel input, #gh-panel textarea { flex: 1; border: 1px solid #c9d0d7; border-radius: 6px; padding: 5px 6px; font: inherit; }
+#gh-panel textarea { min-height: 54px; resize: vertical; }
+#gh-panel button.gh-watch, #gh-bar button { background: #e8a33d; color: #1b1f24; border: 0; border-radius: 6px; padding: 5px 10px; font-weight: 600; cursor: pointer; }
+#gh-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; display: flex; gap: 14px; align-items: center; background: #14324a; color: #fff; padding: 8px 14px; border-radius: 999px; box-shadow: 0 6px 24px rgba(0,0,0,.2); }
+#gh-bar label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+#gh-hidden-count { color: #f3c98a; }
+.gh-badge { display: inline-block; margin: 4px 0; padding: 2px 8px; border-radius: 999px; background: #14324a; color: #fff; font: 600 12px/1.6 system-ui, sans-serif; }
+.gh-hidden { display: none !important; }

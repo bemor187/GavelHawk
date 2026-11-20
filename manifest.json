@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "GavelHawk",
+  "version": "0.1.0",
+  "description": "Spend less time on GovDeals: watchlist dashboard, saved-search alerts, true cost, outbid alerts, filters, notes and timed bids.",
+  "permissions": ["alarms", "storage", "tabs", "scripting", "notifications"],
+  "host_permissions": [
+    "https://www.govdeals.com/*",
+    "https://api.zippopotam.us/*"
+  ],
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "options_page": "src/dashboard/dashboard.html",
+  "content_scripts": [
+    {
+      "matches": ["https://www.govdeals.com/*"],
+      "js": ["src/shared/cost.js", "src/content/selectors.js", "src/content/content.js"],
+      "css": ["src/content/content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
