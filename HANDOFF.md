@@ -45,6 +45,24 @@ Owner's defaults: home ZIP 34951, max travel 80 mi. These must stay user-editabl
 - `cost.js`: city lookups retry with St./Ft./Mt. spelled out (zippopotam needs "port saint lucie").
 - Click sequence (type amount → Bid Now → Accept Bid) passes on a mock of the live markup. No real bid placed.
 
+**v0.1.3: bid N seconds before close (2026-11-20)**
+- Popup loads the listing's exact close time and offers a lead dropdown (10 to 2 s before close, or
+  "At a set time…"). Last choice is remembered (`lastLead`).
+- Exact time: the page text only shows minutes. `src/content/pagehook.js` runs in the page's MAIN world
+  and forwards two responses the GovDeals app already fetches: `maestro.lqdt1.com/bids/bidbox/...`
+  (`assetAuctionEndDateUTC`, to the second) and `buyers/servertimestamp` (server clock, ms). It makes
+  no requests itself; that API needs GovDeals' own keys, which we don't copy. `GHParse.readApi` parses them.
+- `content.js` `closeServer()` uses the API end, or the page's minute + API seconds once an auto-extension
+  moves the page. `closeLocal()` corrects for PC clock skew. The API end is tied to the listing key (SPA).
+- Flow: bid record `{leadSec, endsAt}` → alarm 75 s early → `armSnipe` opens the tab → content script
+  opens a `snipe` port and reports the close time every 2 s → background times `stage` (fire − 6 s: type
+  amount, Bid Now) and `fire` (Accept Bid; falls back to the full sequence if the Accept step closed).
+  Timing is in the service worker because hidden tabs throttle timers. Armed bids stay listed and can be cancelled.
+- Live dry runs (`dryRun: true`, no clicks; not in the UI): fired 2.993 s before close for a 3 s lead and
+  1.999 s for a 2 s lead, on a lot that auto-extended twice while armed (21:25 → 21:28 → 21:31).
+- Fixed: notifications never showed. `iconUrl` was relative and resolved from `src/`; now `chrome.runtime.getURL`.
+- Last outcome is stored in `lastBidResult`.
+
 How it was tested (reusable): branded Chrome 137+ ignores `--load-extension`. Launch Chrome with
 `--headless=new --remote-debugging-pipe --enable-unsafe-extension-debugging`, then send the CDP command
 `Extensions.loadUnpacked {path}`, open the page and `Runtime.evaluate`. Harness scripts were in the
@@ -63,8 +81,10 @@ session scratchpad, not committed.
 1. Load the extension: `chrome://extensions` → Developer mode → **Load unpacked** → repo root.
    After any code change, click the reload icon on the extension card and refresh the GovDeals tab.
 2. Real bid test, only with the owner's explicit OK on item and amount: open the popup on a cheap
-   listing, schedule the minimum bid 2 min out, watch the tab do Bid Now → Accept Bid, and check the
-   notification. If GovDeals shows any extra step, add its selector to `SEL`.
+   listing closing soon, pick "5 s before close", and watch the tab do Bid Now (about 6 s early) → Accept Bid.
+   Check the notification reports the seconds before close. Unknowns: whether the Accept step stays open
+   for those 6 s, and whether Accept takes a server round trip. If GovDeals shows any extra step, add its
+   selector to `SEL`.
 3. Background checks: watch an item with a "My bid" below the current price, then click
    **Check now** in the dashboard. Expect an "Outbid" notification. Save a search and confirm
    a second check notifies only on new listings.
@@ -77,13 +97,15 @@ session scratchpad, not committed.
 | File | What lives there |
 |---|---|
 | `src/content/selectors.js` | **Only file that knows GovDeals' layout.** `SEL` selectors, `LABELS` regexes, `parseWhen`, `parseListing`, `parseResults`, `climbToCard`, `findBidControls`, `findConfirm` |
-| `src/content/content.js` | Listing panel (`renderPanel`), results badges/filters (`decorateResults`, `ensureToolbar`), `placeBid`, SPA routing via MutationObserver |
-| `src/background.js` | `readPage` (opens inactive tab, asks content script, closes), `refreshWatchlist`, `checkSearches`, `fireBid`, message handlers, `poll` alarm |
+| `src/content/pagehook.js` | MAIN-world hook: forwards GovDeals' bid-box and server-clock responses via `postMessage` |
+| `src/content/content.js` | Listing panel (`renderPanel`), results badges/filters (`decorateResults`, `ensureToolbar`), `stageBid`/`placeBid`, `closeServer`/`getEnd`, `armSnipe`, SPA routing via MutationObserver |
+| `src/background.js` | `readPage` (opens inactive tab, asks content script, closes), `refreshWatchlist`, `checkSearches`, `fireBid`, `armSnipe` + `snipe` port timing, message handlers, `poll` alarm |
+| `src/popup/popup.js` | Schedule bids: loads close time (`getEnd`), lead dropdown |
 | `src/shared/cost.js` | `DEFAULT_SETTINGS`, `trueCost`, `milesBetween` (ZIP or "City, State" via zippopotam.us + cache, ×1.2 road factor), `listingKey` |
 | `src/dashboard/dashboard.js` | Watchlist, searches, bids, notes, settings, export/import |
 
 Storage (`chrome.storage.local`): `settings`, `watchlist{key}`, `searches{id}`, `notes{key}`,
-`bids{bid-*}`, `zipCache` (keyed by ZIP or `st/city` path). `listingKey` = `<account>-<asset>` from `/asset/<account>/<asset>`.
+`bids{bid-*}` (snipes add `leadSec`, `endsAt`, `armed`), `lastBidResult`, `lastLead`, `zipCache` (keyed by ZIP or `st/city` path). `listingKey` = `<account>-<asset>` from `/asset/<account>/<asset>`.
 Worker tab ids live in `chrome.storage.session.workerTabs`; content.js skips its UI in those tabs.
 
 ## Notes

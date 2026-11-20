@@ -26,25 +26,112 @@
       return true;
     }
     if (msg.type === "placeBid") { placeBid(msg.amount).then(reply); return true; }
+    if (msg.type === "getEnd") { getEnd().then(reply); return true; }
+    if (msg.type === "armSnipe") { reply({ ok: true }); armSnipe(msg); return false; }
   });
 
-  async function placeBid(amount) {
-    const c = await waitFor(() => { const x = findBidControls(); return x.input && x.button ? x : null; });
-    if (!c) return { ok: false, error: "Bid box or button not found. Set bidInput/bidButton in selectors.js." };
+  // Type the amount and click Bid Now, then wait for the Accept Bid step.
+  async function stageBid(amount, waitMs = 8000) {
+    const c = await waitFor(() => { const x = findBidControls(); return x.input && x.button ? x : null; }, waitMs);
+    if (!c) return { error: "Bid box or button not found. Are you signed in? (selectors: bidInput/bidButton)" };
     // Set the value the way a framework-driven page (Angular/React) will notice.
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     c.input.focus();
     setter.call(c.input, String(amount));
     c.input.dispatchEvent(new Event("input", { bubbles: true }));
     c.input.dispatchEvent(new Event("change", { bubbles: true }));
-    await sleep(300);
-    const auto = GHParse.SEL.autoBid && document.querySelector(GHParse.SEL.autoBid);
+    await sleep(150);
     c.button.click();
-    const confirm = await waitFor(findConfirm, 8000);
-    if (!confirm) return { ok: false, error: "Clicked Bid Now but no Accept Bid step appeared. Bid NOT confirmed; check the tab." };
-    confirm.click();
+    const confirm = await waitFor(findConfirm, waitMs);
+    if (!confirm) return { error: "Clicked Bid Now but no Accept Bid step appeared. Bid NOT confirmed; check the tab." };
+    return { confirm };
+  }
+  const autoBidOn = () => { const a = GHParse.SEL.autoBid && document.querySelector(GHParse.SEL.autoBid); return a ? a.checked : null; };
+
+  async function placeBid(amount) {
+    const st = await stageBid(amount);
+    if (st.error) return { ok: false, error: st.error };
+    const autoBid = autoBidOn();
+    st.confirm.click();
     await sleep(2000);
-    return { ok: true, confirmed: true, autoBid: auto ? auto.checked : null };
+    return { ok: true, confirmed: true, autoBid };
+  }
+
+  // ---------- exact close time ----------
+  // pagehook.js forwards GovDeals' own bid-box and server-clock responses.
+  const apiData = { endsAt: null, key: null, skew: 0, haveClock: false };   // skew = server clock - PC clock
+  // The single-page app keeps this script alive across listings, so only use
+  // an end time that belongs to the listing now on screen.
+  const api = {
+    get endsAt() { return apiData.key && apiData.key === listingKey(location.href) ? apiData.endsAt : null; },
+    get skew() { return apiData.skew; },
+    get haveClock() { return apiData.haveClock; }
+  };
+  window.addEventListener("message", (e) => {
+    if (e.source !== window || !e.data || !e.data.__gavelhawk) return;
+    const r = GHParse.readApi(e.data.url, e.data.body);
+    if (!r) return;
+    if (r.endsAt) { apiData.endsAt = r.endsAt; apiData.key = r.key; }
+    if (r.serverNow) { apiData.skew = r.serverNow - (e.data.sentAt + e.data.recvAt) / 2; apiData.haveClock = true; }
+  });
+  window.postMessage({ __gavelhawkReplay: 1 }, location.origin);
+
+  // Close time on the server's clock. The page text only shows minutes and
+  // follows auto-extensions live; the API value has seconds but is from page
+  // load. Use the API value unless the page has moved on (an extension), then
+  // the page's minute plus the API's seconds.
+  function closeServer() {
+    const dom = parseListing().endsAt;
+    if (api.endsAt && (dom == null || Math.abs(api.endsAt - dom) < 60000)) return api.endsAt;
+    if (dom != null) return dom + (api.endsAt ? ((api.endsAt % 60000) + 60000) % 60000 : 0);
+    return null;
+  }
+  const closeLocal = () => { const s = closeServer(); return s == null ? null : s - api.skew; };
+
+  async function getEnd() {
+    await waitFor(() => api.endsAt && api.haveClock, 8000);
+    const d = parseListing();
+    return { endsAt: closeServer(), exact: !!api.endsAt, clockSkewMs: api.haveClock ? Math.round(api.skew) : null,
+      title: d.title, url: d.url };
+  }
+
+  // ---------- bid N seconds before close ----------
+  // The background opens this tab ~75 s before close and sends armSnipe. We
+  // keep a port open and report the close time (PC clock) every 2 s; the
+  // background, whose timers aren't throttled like a hidden tab's, tells us
+  // when to stage (amount typed, Bid Now clicked) and when to fire (Accept Bid).
+  async function armSnipe({ bidId, amount, dryRun }) {
+    const port = chrome.runtime.connect({ name: "snipe" });
+    port.postMessage({ hello: bidId });
+    await waitFor(() => api.endsAt && api.haveClock, 10000);
+    const report = () => { try { port.postMessage({ endLocal: closeLocal(), exact: !!api.endsAt, skew: api.skew }); } catch {} };
+    report();
+    const iv = setInterval(report, 2000);
+    port.onDisconnect.addListener(() => clearInterval(iv));
+    let staged = null;
+    port.onMessage.addListener(async (m) => {
+      if (m.stage) {
+        if (dryRun) { port.postMessage({ staged: true, dry: true }); return; }
+        const st = await stageBid(amount, 4000);
+        staged = st.confirm || null;
+        port.postMessage({ staged: !!staged, error: st.error });
+      }
+      if (m.fire) {
+        const t = Date.now(), endAt = closeLocal();
+        let result;
+        if (dryRun) {
+          result = { ok: true, dry: true };
+        } else {
+          let confirm = findConfirm();
+          if (!confirm) { const st = await stageBid(amount, 3000); confirm = st.confirm; if (!confirm) result = { ok: false, error: st.error }; }
+          if (confirm) { const autoBid = autoBidOn(); confirm.click(); result = { ok: true, autoBid }; }
+        }
+        const firedBeforeEndMs = endAt == null ? null : Math.round(endAt - t);
+        clearInterval(iv);
+        if (!dryRun && result.ok) await sleep(2500);
+        port.postMessage({ done: true, ...result, firedBeforeEndMs, highBidder: parseListing().highBidder });
+      }
+    });
   }
 
   // ---------- listing page panel ----------

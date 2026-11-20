@@ -172,5 +172,24 @@
         .find((b) => /confirm|yes|place\s*bid|submit/i.test(text(b)));
   }
 
-  globalThis.GHParse = { SEL, parseWhen, parseListing, parseResults, findBidControls, findConfirm, num };
+  // Responses forwarded by pagehook.js from GovDeals' own API calls:
+  //   bids/bidbox/...         {"assetAuctionEndDateUTC":"2026-11-21T17:22:00Z", "autoExtensionCount":0, ...}
+  //   buyers/servertimestamp  {"serverUtcDateTime":"2026-11-20T21:04:29.1067312Z"}
+  // Returns { endsAt, key } or { serverNow } (ms), or null. key matches
+  // GH.listingKey ("<account>-<asset>"); the bid-box URL is .../bidbox/GD/<account>/<asset>/...
+  function readApi(url, body) {
+    let j; try { j = JSON.parse(body); } catch { return null; }
+    if (/bidbox/i.test(url) && j && j.assetAuctionEndDateUTC) {
+      const ms = Date.parse(j.assetAuctionEndDateUTC);
+      const m = String(url).match(/bidbox\/[^/]+\/(\d+)\/(\d+)/i);
+      return isNaN(ms) ? null : { endsAt: ms, key: m ? `${m[1]}-${m[2]}` : null, extensions: j.autoExtensionCount ?? null };
+    }
+    if (/servertimestamp/i.test(url) && j && j.serverUtcDateTime) {
+      const ms = Date.parse(j.serverUtcDateTime);
+      return isNaN(ms) ? null : { serverNow: ms };
+    }
+    return null;
+  }
+
+  globalThis.GHParse = { SEL, readApi, parseWhen, parseListing, parseResults, findBidControls, findConfirm, num };
 })();

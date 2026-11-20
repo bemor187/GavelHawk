@@ -84,7 +84,7 @@ async function renderBids() {
   const rows = Object.entries(bids).sort((a, b) => a[1].when - b[1].when);
   $("bidRows").innerHTML = rows.length ? rows.map(([id, b]) => `
     <tr data-id="${esc(id)}"><td><a href="${esc(b.url)}" target="_blank">${esc(b.title || b.url)}</a></td>
-    <td class="num">${money(b.amount)}</td><td class="num">${new Date(b.when).toLocaleString()}</td>
+    <td class="num">${money(b.amount)}</td><td class="num">${b.leadSec ? `${b.leadSec}s before close${b.armed ? " (armed)" : ""}<br>` : ""}${new Date(b.when).toLocaleString()}</td>
     <td><button class="danger small rm">Cancel</button></td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">No bids scheduled.</td></tr>`;
 }

@@ -10,7 +10,7 @@ A Chrome extension that cuts the time you spend on [GovDeals](https://www.govdea
 | **Outbid alerts** | Desktop notification when the price passes your bid, plus an "ending soon" alert. |
 | **Quick filters** | Hide listings past your travel limit or marked pickup-only, right on the results page. |
 | **Private notes** | A note box on every listing; notes also show as badges on search results. |
-| **Timed bids** | Schedule a bid for a set time; GavelHawk opens the listing and places it. |
+| **Timed bids** | Pick 10 to 2 seconds before close (or a set time); GavelHawk reads the exact closing time, opens the listing and places the bid, following any auto-extension. |
 
 ## Install (developer mode)
 
@@ -43,7 +43,9 @@ Background checks open the listing or search in an inactive tab for a few second
 ## Timed bids: read this
 
 - Chrome must be running and you must be logged in to GovDeals when the bid fires.
-- Schedule it a minute or two before close to allow for page load.
+- Open the popup on a listing: it loads the closing time (to the second) and you pick how many seconds before close to bid.
+- About 75 seconds before close GavelHawk opens the listing in a tab. Leave that tab open. A few seconds early it types the amount and clicks Bid Now; at your chosen second it clicks Accept Bid.
+- Timing uses GovDeals' server clock, so a wrong PC clock doesn't matter. If the auction auto-extends, the bid moves with it.
 - Test it once on a low-stakes item before trusting it.
 - GovDeals already offers proxy (max) bidding, and its terms may restrict automated bidding tools. Check them; you're responsible for your account.
 

@@ -33,7 +33,8 @@ async function notify(title, message, url) {
     await session.set({ notifUrls });
   }
   chrome.notifications.create(id, {
-    type: "basic", iconUrl: "icons/icon128.png", title, message, priority: 2,
+    // Relative paths resolve from src/, so build the full extension URL.
+    type: "basic", iconUrl: chrome.runtime.getURL("icons/icon128.png"), title, message, priority: 2,
     buttons: url ? [{ title: "Open listing" }] : []
   });
 }
@@ -153,10 +154,22 @@ async function updateBadge() {
 }
 
 // ---------- timed bids ----------
+// Bids with leadSec are "N seconds before close": the alarm fires ARM_MS
+// early, we open the listing, and the content script reports the exact close
+// time over a port while we time the stage and fire steps here.
+const ARM_MS = 75000, STAGE_MS = 6000;
+const snipes = new Map(); // bid id -> { b, staged, fired }
+
 async function fireBid(alarmId) {
   const { bids = {} } = await local.get("bids");
   const b = bids[alarmId];
   if (!b) return;
+  if (b.leadSec) {
+    // Stays listed (and cancellable) until it finishes.
+    bids[alarmId] = { ...b, armed: true };
+    await local.set({ bids });
+    return armSnipe(alarmId, b);
+  }
   delete bids[alarmId];
   await local.set({ bids });
   const tab = await chrome.tabs.create({ url: b.url, active: true });
@@ -166,6 +179,66 @@ async function fireBid(alarmId) {
     (res.autoBid ? " (as Autobid max)" : ""), b.url);
   else notify("Bid FAILED", (res && res.error) || "Couldn't reach the page. Are you logged in?", b.url);
 }
+
+async function armSnipe(id, b) {
+  snipes.set(id, { b, staged: false, fired: false, done: false });
+  const tab = await chrome.tabs.create({ url: b.url, active: true });
+  await waitLoaded(tab.id);
+  const res = await ask(tab.id, { type: "armSnipe", bidId: id, amount: b.amount, dryRun: !!b.dryRun });
+  if (!res?.ok) {
+    snipes.delete(id);
+    notify("Bid FAILED", "Couldn't reach the listing page to arm the bid.", b.url);
+  }
+}
+
+async function finishSnipe(id, title, message) {
+  const sn = snipes.get(id);
+  if (!sn || sn.done) return;
+  sn.done = true;
+  clearTimeout(sn.stageT); clearTimeout(sn.fireT);
+  snipes.delete(id);
+  try { sn.port?.disconnect(); } catch {}
+  const { bids = {} } = await local.get("bids");
+  delete bids[id];
+  await local.set({ bids, lastBidResult: { title, message, url: sn.b.url, at: Date.now() } });
+  notify(title, message, sn.b.url);
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "snipe") return;
+  let id = null;
+  port.onMessage.addListener((m) => {
+    if (m.hello) { id = m.hello; const s0 = snipes.get(id); if (s0) s0.port = port; return; }
+    const sn = snipes.get(id);
+    if (!sn) return;
+    const { b } = sn, leadMs = b.leadSec * 1000;
+    if (m.endLocal !== undefined) {
+      const now = Date.now();
+      if (m.endLocal == null) return finishSnipe(id, "Bid FAILED", "Couldn't read the closing time on the page.");
+      if (m.endLocal <= now) return finishSnipe(id, "Bid FAILED", `Auction already closed: ${b.title || b.url}`);
+      // Re-plan on every report, so an auto-extension moves the bid with it.
+      const fireAt = m.endLocal - leadMs;
+      if (!sn.staged) {
+        clearTimeout(sn.stageT);
+        sn.stageT = setTimeout(() => { sn.staged = true; port.postMessage({ stage: true }); }, Math.max(0, fireAt - STAGE_MS - now));
+      }
+      if (!sn.fired) {
+        clearTimeout(sn.fireT);
+        sn.fireT = setTimeout(() => { sn.fired = true; port.postMessage({ fire: true }); }, Math.max(0, fireAt - now));
+      }
+    }
+    if (m.done) {
+      const when = m.firedBeforeEndMs == null ? "" : ` ${(m.firedBeforeEndMs / 1000).toFixed(1)}s before close`;
+      if (m.dry) return finishSnipe(id, "Dry run OK", `Would have bid ${money(b.amount)}${when}`);
+      if (m.ok) finishSnipe(id, "Bid placed", `${money(b.amount)}${when} on ${b.title || "listing"}` +
+        (m.autoBid ? " (as Autobid max)" : "") + (m.highBidder ? ". You're the high bidder." : ""));
+      else finishSnipe(id, "Bid FAILED", m.error || "Unknown error. Check the tab.");
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    if (id) finishSnipe(id, "Bid FAILED", "The listing tab closed or reloaded before the bid went in.");
+  });
+});
 
 // ---------- alarms ----------
 let polling = false;
@@ -202,12 +275,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       case "scheduleBid": {
         const { bids = {} } = await local.get("bids");
         const id = "bid-" + Date.now();
-        bids[id] = { url: msg.url, amount: msg.amount, when: msg.when, title: msg.title || "" };
+        const leadSec = msg.leadSec && msg.endsAt ? +msg.leadSec : null;
+        const when = leadSec ? msg.endsAt - leadSec * 1000 : msg.when;
+        bids[id] = { url: msg.url, amount: msg.amount, when, title: msg.title || "",
+          ...(leadSec ? { leadSec, endsAt: msg.endsAt } : {}), ...(msg.dryRun ? { dryRun: true } : {}) };
         await local.set({ bids });
-        chrome.alarms.create(id, { when: msg.when });
+        chrome.alarms.create(id, { when: leadSec ? Math.max(Date.now() + 500, when - ARM_MS) : when });
         return { id };
       }
+      case "getEnd": {
+        // For a listing URL that isn't open: read it in a hidden tab.
+        return await readPage(msg.url, { type: "getEnd" });
+      }
       case "cancelBid": {
+        if (snipes.has(msg.id)) await finishSnipe(msg.id, "Bid cancelled", "Nothing was bid.");
         const { bids = {} } = await local.get("bids");
         delete bids[msg.id];
         await local.set({ bids });

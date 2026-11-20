@@ -11,16 +11,32 @@
     li { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 12px; }
     .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
+    .ends { font-size: 12px; line-height: 1.4; min-height: 17px; opacity: .85; }
+    .ends b { font-variant-numeric: tabular-nums; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
   <h1>🦅 GavelHawk</h1>
   <form id="f">
     <input id="url" placeholder="GovDeals listing URL" required>
+    <div id="ends" class="ends"></div>
     <div class="row">
       <input id="amount" type="number" min="1" step="1" placeholder="Bid $" required>
-      <input id="when" type="datetime-local" required>
+      <select id="lead" title="When to place the bid">
+        <option value="10">10 s before close</option>
+        <option value="9">9 s before close</option>
+        <option value="8">8 s before close</option>
+        <option value="7">7 s before close</option>
+        <option value="6">6 s before close</option>
+        <option value="5">5 s before close</option>
+        <option value="4">4 s before close</option>
+        <option value="3">3 s before close</option>
+        <option value="2">2 s before close</option>
+        <option value="custom">At a set time…</option>
+      </select>
     </div>
+    <input id="when" type="datetime-local" class="hidden">
     <button type="submit">Schedule bid</button>
   </form>
   <ul id="list"></ul>
