@@ -12,54 +12,62 @@ Plain JS, no build step, no dependencies. Load unpacked from the repo root.
 Owner's defaults: home ZIP 34951, max travel 80 mi. These must stay user-editable
 (Dashboard → Settings) because the extension will be distributed.
 
-## Completed (v0.1.0, commit f608266)
+## Completed
 
-- All six features written: `manifest.json`, `src/background.js`, `src/shared/cost.js`,
-  `src/content/{selectors.js,content.js,content.css}`, `src/popup/*`, `src/dashboard/*`, `icons/`.
-- Loaded in headless Chrome: service worker starts, no console errors.
-- Dashboard settings save/load, bid scheduling creates a `bid-*` alarm, popup renders.
-- Parser (`GHParse.parseListing`, `parseResults`, `findBidControls`) passes on **mock** pages only.
-- README, MIT license, pushed to github.com/bemor187/GavelHawk.
+**v0.1.0 (commit f608266)**: all six features written, loads cleanly, mock-page parser tests. README, MIT license.
+
+**v0.1.1: parser verified on live govdeals.com (2026-11-20, logged out)**
+- `SEL` in `src/content/selectors.js` now has real selectors for listing pages (`h1.product-title`,
+  `#currentBid`, `.product-details app-ux-timer`, `#lnkAssetDetailLocation`, `#seller_information` map link
+  for the ZIP, `#lblBuyerPremium`) and search results (`.card-search`, excluding `.swiper` carousels;
+  `[name=pAssetCurrentBid]`, `[name=pAssetLocation]`, `a.link-click`).
+- `parseListing()` on https://www.govdeals.com/en/asset/433/3298 returns every field, including
+  `zip` 55987, `premiumPct` 12.5 and `pickupOnly` true ("SHIPPING IS NOT AVAILABLE").
+- End times: `parseWhen()` reads the "(Nov 21, 2026 12:22 PM EST)" part and maps EST/EDT/etc. to an
+  offset, so they're correct in any zone.
+- `parseResults()`: 24/24 cards with title, price, endsAt and location on `/en/search?kWord=truck`,
+  `/en/closing-today` and `/en/new-listings`. Hidden recommendation widgets and carousels are skipped.
+- Result cards show only "City, State, USA" with no ZIP, so `milesBetween()` in `cost.js` now takes
+  a ZIP *or* "City, State" (zippopotam `/us/<st>/<city>`). Callers pass `zip || location`.
+- The listing panel uses the listing's own buyer's premium when shown, falling back to Settings.
+- End-to-end check with the real extension in headless Chrome: the panel renders on the listing, and the
+  results page shows 24 badges, the filter bar and the "N hidden" count.
+
+How it was tested (reusable): branded Chrome 137+ ignores `--load-extension`. Launch Chrome with
+`--headless=new --remote-debugging-pipe --enable-unsafe-extension-debugging`, then send the CDP command
+`Extensions.loadUnpacked {path}`, open the page and `Runtime.evaluate`. Harness scripts were in the
+session scratchpad, not committed.
 
 ## Current blockers
 
-1. **Never run against live GovDeals.** The site is a JavaScript SPA; a plain fetch returns an
-   empty shell, so the real DOM has never been inspected. Every selector in
-   `src/content/selectors.js` is `null`, and parsing relies on label heuristics
-   ("Current Bid", "Auction Close", "Location"). Expect some fields to show "—".
-2. **Bid flow untested.** Bid input, Place Bid button and confirm dialog are found by guesses
-   in `findBidControls()` / `findConfirm()`. Must be verified while logged in.
-3. Background checks (outbid, saved-search alerts) depend on 1 working.
+1. **Bid flow untested.** The bid box only appears when signed in. `SEL.bidInput`, `bidButton` and
+   `confirmButton` are still `null` and fall back to guesses in `findBidControls()` / `findConfirm()`.
+2. **Background checks untested** (outbid and saved-search alerts). The parsers they use now work.
+3. Only grid view is verified. If GovDeals has a list view toggle, check that `.card-search` still matches.
 
 ## Next steps
 
 1. Load the extension: `chrome://extensions` → Developer mode → **Load unpacked** → repo root.
    After any code change, click the reload icon on the extension card and refresh the GovDeals tab.
-2. Open a live listing, e.g. https://www.govdeals.com/en/asset/433/3298. Check the GavelHawk panel
-   (bottom right). In DevTools console on that tab, choose the extension's content-script context
-   and run `GHParse.parseListing()`. Every field (`title, price, endsAt, location, zip`) should be non-null.
-3. Where a field is wrong, inspect the element and set an exact selector in the `SEL` object in
-   `src/content/selectors.js`. Prefer stable ids / `data-*` attributes over generated class names.
-   Also check `endsAt` time zone parsing (`Date.parse` with the ET suffix stripped, line in `parseListing`).
-4. Open a search results page. Run `GHParse.parseResults().length` and compare with the visible count.
-   If cards are wrong, set `SEL.resultCard`. Confirm badges and the bottom filter bar appear.
-5. Bid flow: on a cheap listing, run `GHParse.findBidControls()` and confirm both `input` and
-   `button` are the real elements. Set `SEL.bidInput`, `SEL.bidButton`, `SEL.confirmButton`.
-   Then schedule a real low bid 2 min out from the popup and watch it fire. Only bid what the
-   owner agrees to spend.
-6. Background checks: watch an item with a "My bid" below the current price, then click
+2. Bid flow (needs the owner signed in, in a real browser): on a cheap listing, in DevTools choose
+   the GavelHawk content-script context and run `GHParse.findBidControls()`. Confirm `input` and `button`
+   are the real elements, then set `SEL.bidInput`, `SEL.bidButton` and `SEL.confirmButton`. Then schedule a
+   real low bid 2 min out from the popup and watch it fire. Only bid what the owner agrees to spend.
+3. Background checks: watch an item with a "My bid" below the current price, then click
    **Check now** in the dashboard. Expect an "Outbid" notification. Save a search and confirm
    a second check notifies only on new listings.
-7. Commit per fix, push to `main`, bump `version` in `manifest.json` when a round of fixes is done.
+4. Optional: the listing's map link carries lat/lon (`maps.google.com/maps?q=44.05,-91.63`), which could
+   replace the ZIP lookup on listing pages.
+5. Commit per fix, push to `main`, bump `version` in `manifest.json` when a round of fixes is done.
 
 ## Key files and functions
 
 | File | What lives there |
 |---|---|
-| `src/content/selectors.js` | **Only file that knows GovDeals' layout.** `SEL` overrides, `LABELS` regexes, `parseListing`, `parseResults`, `climbToCard`, `findBidControls`, `findConfirm` |
+| `src/content/selectors.js` | **Only file that knows GovDeals' layout.** `SEL` selectors, `LABELS` regexes, `parseWhen`, `parseListing`, `parseResults`, `climbToCard`, `findBidControls`, `findConfirm` |
 | `src/content/content.js` | Listing panel (`renderPanel`), results badges/filters (`decorateResults`, `ensureToolbar`), `placeBid`, SPA routing via MutationObserver |
 | `src/background.js` | `readPage` (opens inactive tab, asks content script, closes), `refreshWatchlist`, `checkSearches`, `fireBid`, message handlers, `poll` alarm |
-| `src/shared/cost.js` | `DEFAULT_SETTINGS`, `trueCost`, `milesBetween` (zippopotam.us + cache, ×1.2 road factor), `listingKey` |
+| `src/shared/cost.js` | `DEFAULT_SETTINGS`, `trueCost`, `milesBetween` (ZIP or "City, State" via zippopotam.us + cache, ×1.2 road factor), `listingKey` |
 | `src/dashboard/dashboard.js` | Watchlist, searches, bids, notes, settings, export/import |
 
 Storage (`chrome.storage.local`): `settings`, `watchlist{key}`, `searches{id}`, `notes{key}`,

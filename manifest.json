@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GavelHawk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Spend less time on GovDeals: watchlist dashboard, saved-search alerts, true cost, outbid alerts, filters, notes and timed bids.",
   "permissions": ["alarms", "storage", "tabs", "scripting", "notifications"],
   "host_permissions": [
