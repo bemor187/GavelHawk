@@ -5,15 +5,26 @@
 // on GovDeals -> Inspect -> copy its id/class). Left as null, GavelHawk falls
 // back to reading the page text by its labels ("Current Bid", "Location"...).
 (function () {
+  // Verified against live govdeals.com on 2026-11-20 (logged out).
   const SEL = {
-    title: null,          // e.g. "h1"
-    price: null,          // current bid amount
-    endsAt: null,         // auction close date/time
-    location: null,       // city, state ZIP
+    // listing page (/en/asset/<account>/<asset>)
+    title: "h1.product-title",
+    price: "#currentBid",                         // "$36.00 USD (10 Bids)"
+    endsAt: ".product-details app-ux-timer",      // "21h50m(Nov 21, 2026 12:22 PM EST)"
+    location: "#lnkAssetDetailLocation",          // "Winona, Minnesota, USA" (no ZIP)
+    address: "#seller_information a[href*='maps.google']", // street address with ZIP
+    premium: "#lblBuyerPremium",                  // data-value="12.5"
+    // bid controls: only shown when signed in, not yet verified
     bidInput: null,       // the bid amount box
     bidButton: null,      // "Place Bid" button
     confirmButton: null,  // button in the confirm dialog, if any
-    resultCard: null      // one listing card on search results
+    // search results (grid view)
+    resultCard: ".card-search",
+    resultExclude: ".swiper",                     // featured carousels reuse the card markup
+    resultTitle: "a.link-click",                  // title attr holds the untruncated title
+    resultPrice: "[name=pAssetCurrentBid]",       // title="275", text "USD 275.00"
+    resultLocation: "[name=pAssetLocation]",      // "Nashville , Tennessee, USA" (no ZIP)
+    resultEndsAt: "app-ux-timer"
   };
 
   const LABELS = {
@@ -21,11 +32,26 @@
     endsAt: [/auction\s*clos\w*/i, /closing\s*date/i, /end\s*date/i, /\bends\b/i],
     location: [/(item\s*|pickup\s*)?location/i],
     highBidder: [/you\s*are\s*(the\s*)?(current\s*)?high(est)?\s*bidder/i, /you('|’)re\s*winning/i],
-    pickupOnly: [/pick\s*-?\s*up\s*only/i, /no\s*shipping/i]
+    pickupOnly: [/pick\s*-?\s*up\s*only/i, /no\s*shipping/i, /shipping\s+is\s+not\s+available/i]
   };
 
   const text = (el) => (el ? el.innerText || el.textContent || "" : "").trim();
   const num = (s) => { const m = String(s).replace(/,/g, "").match(/\$?\s*(\d+(\.\d+)?)/); return m ? +m[1] : null; };
+  // GovDeals shows "21h50m(Nov 21, 2026 12:22 PM EST)": take the part in
+  // parentheses and turn the zone name into an offset, so the time is right
+  // whatever zone the user's computer is in.
+  const TZ = { EST: "-0500", EDT: "-0400", CST: "-0600", CDT: "-0500", MST: "-0700", MDT: "-0600",
+    PST: "-0800", PDT: "-0700", AKST: "-0900", AKDT: "-0800", HST: "-1000",
+    ET: "-0500", CT: "-0600", MT: "-0700", PT: "-0800" };
+  function parseWhen(s) {
+    if (!s) return null;
+    let t = (String(s).match(/\(([^)]*\d{4}[^)]*)\)/) || [, s])[1].trim();
+    const m = t.match(/^(.*?)\s+([A-Z]{2,4})$/);
+    if (m && TZ[m[2]]) t = m[1] + " GMT" + TZ[m[2]];
+    const ms = Date.parse(t);
+    return isNaN(ms) ? null : ms;
+  }
+
   const zipIn = (s) => (String(s).match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || null;
 
   // Find the text that sits next to a label like "Current Bid".
@@ -62,14 +88,17 @@
     const priceText = text(q(SEL.price)) || byLabel(LABELS.price);
     const endText = text(q(SEL.endsAt)) || byLabel(LABELS.endsAt);
     const locText = text(q(SEL.location)) || byLabel(LABELS.location);
-    const ends = endText ? Date.parse(endText.replace(/\s+(ET|EST|EDT|CT|CST|CDT|MT|PT|PST|PDT)\b/, "")) : NaN;
+    const addrText = text(q(SEL.address)) || byLabel([/item\s*location/i]) || "";
+    const prem = q(SEL.premium);
+    const premiumPct = prem ? parseFloat(prem.getAttribute("data-value") || text(prem)) : NaN;
     return {
       url: location.href.split("#")[0],
       title: title.slice(0, 140),
       price: num(priceText),
-      endsAt: isNaN(ends) ? null : ends,
+      endsAt: parseWhen(endText),
       location: locText ? locText.split("\n")[0].slice(0, 80) : null,
-      zip: zipIn(locText || ""),
+      zip: zipIn(addrText) || zipIn(locText || ""),
+      premiumPct: isNaN(premiumPct) ? null : premiumPct,
       highBidder: pageHas(LABELS.highBidder),
       pickupOnly: pageHas(LABELS.pickupOnly)
     };
@@ -80,15 +109,27 @@
     const out = new Map();
     const links = document.querySelectorAll('a[href*="/asset/"]');
     for (const a of links) {
-      const card = (SEL.resultCard && a.closest(SEL.resultCard)) || climbToCard(a);
+      if (SEL.resultExclude && a.closest(SEL.resultExclude)) continue;
+      // With resultCard set, links outside a card (recommendation widgets,
+      // nav) are skipped instead of guessed at.
+      const card = SEL.resultCard ? a.closest(SEL.resultCard) : climbToCard(a);
       if (!card || out.has(card)) continue;
       const t = text(card);
+      const q = (s) => (s ? card.querySelector(s) : null);
+      const titleEl = q(SEL.resultTitle), priceEl = q(SEL.resultPrice), locEl = q(SEL.resultLocation);
+      const loc = locEl ? (locEl.getAttribute("title") || text(locEl)).replace(/\s+,/g, ",").trim() : null;
       out.set(card, {
         card,
         url: a.href.split("#")[0],
-        title: (text(card.querySelector("h2,h3,h4,h5")) || text(a)).slice(0, 140),
-        price: num((t.match(/\$\s*[\d,]+(\.\d+)?/) || [])[0] || ""),
-        zip: zipIn(t),
+        title: ((titleEl && (titleEl.getAttribute("title") || text(titleEl))) ||
+          text(card.querySelector("h2,h3,h4,h5")) || text(a)).slice(0, 140),
+        price: priceEl ? num(priceEl.getAttribute("title") || text(priceEl))
+          : num((t.match(/\$\s*[\d,]+(\.\d+)?/) || [])[0] || ""),
+        endsAt: parseWhen(text(q(SEL.resultEndsAt))),
+        location: loc,
+        // Cards carry no ZIP. Read one only from the location line, never the
+        // whole card: lot numbers like "25917-1" look like ZIPs.
+        zip: zipIn(loc || (locEl ? "" : t)),
         pickupOnly: LABELS.pickupOnly.some((p) => p.test(t))
       });
     }
@@ -105,7 +146,7 @@
       if (assetIds(n.parentElement).size > 1) break;
       n = n.parentElement;
     }
-    return /\$\s*\d/.test(text(n)) ? n : null;
+    return /(\$|USD)\s*\d/.test(text(n)) ? n : null;
   }
 
   function findBidControls() {
@@ -123,5 +164,5 @@
         .find((b) => /confirm|yes|place\s*bid|submit/i.test(text(b)));
   }
 
-  globalThis.GHParse = { SEL, parseListing, parseResults, findBidControls, findConfirm, num };
+  globalThis.GHParse = { SEL, parseWhen, parseListing, parseResults, findBidControls, findConfirm, num };
 })();

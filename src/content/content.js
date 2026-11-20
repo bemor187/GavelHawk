@@ -51,8 +51,11 @@
     const d = await waitFor(() => { const x = parseListing(); return x.price != null ? x : null; }, 10000) || parseListing();
     const key = listingKey(d.url);
     const { watchlist = {}, notes = {} } = await chrome.storage.local.get(["watchlist", "notes"]);
-    const miles = d.zip ? await milesBetween(s.homeZip, d.zip) : null;
-    const c = trueCost(d.price || 0, s, miles);
+    const where = d.zip || d.location;
+    const miles = where ? await milesBetween(s.homeZip, where) : null;
+    // Use the listing's own buyer's premium when the page shows one.
+    const sc = d.premiumPct != null ? { ...s, buyerPremiumPct: d.premiumPct } : s;
+    const c = trueCost(d.price || 0, sc, miles);
 
     const el = document.createElement("div");
     el.id = "gh-panel";
@@ -62,9 +65,9 @@
         <div class="gh-total">${money(c.total)} <span>true cost</span></div>
         <div class="gh-rows">
           <div>Bid</div><div>${money(c.price)}</div>
-          <div>Premium ${s.buyerPremiumPct}%</div><div>${money(c.premium)}</div>
+          <div>Premium ${sc.buyerPremiumPct}%</div><div>${money(c.premium)}</div>
           <div>Tax ${s.salesTaxPct}%</div><div>${money(c.tax)}</div>
-          <div>Travel ${miles == null ? "(no ZIP found)" : miles + " mi" + (s.roundTrip ? " ×2" : "")}</div><div>${money(c.travel)}</div>
+          <div>Travel ${miles == null ? "(no location found)" : miles + " mi" + (s.roundTrip ? " ×2" : "")}</div><div>${money(c.travel)}</div>
           <div>Time left</div><div>${timeLeft(d.endsAt)}</div>
         </div>
         ${miles != null && miles > s.maxMiles ? `<div class="gh-warn">Past your ${s.maxMiles} mi limit</div>` : ""}
@@ -108,7 +111,8 @@
     let hidden = 0;
     for (const it of items) {
       const key = listingKey(it.url);
-      const miles = it.zip ? await milesBetween(s.homeZip, it.zip) : null;
+      const where = it.zip || it.location;
+      const miles = where ? await milesBetween(s.homeZip, where) : null;
       const c = trueCost(it.price || 0, s, miles);
       let badge = it.card.querySelector(".gh-badge");
       if (!badge) { badge = document.createElement("div"); badge.className = "gh-badge"; it.card.prepend(badge); }

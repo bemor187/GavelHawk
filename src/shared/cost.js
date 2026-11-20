@@ -43,23 +43,44 @@
     return m ? `${m[1]}-${m[2]}` : String(url).split("?")[0];
   }
 
-  // ZIP -> lat/lon with a local cache, then straight-line miles.
-  async function zipLatLon(zip) {
-    if (!/^\d{5}$/.test(zip || "")) return null;
+  const STATES = { alabama: "al", alaska: "ak", arizona: "az", arkansas: "ar", california: "ca", colorado: "co",
+    connecticut: "ct", delaware: "de", "district of columbia": "dc", florida: "fl", georgia: "ga", hawaii: "hi",
+    idaho: "id", illinois: "il", indiana: "in", iowa: "ia", kansas: "ks", kentucky: "ky", louisiana: "la",
+    maine: "me", maryland: "md", massachusetts: "ma", michigan: "mi", minnesota: "mn", mississippi: "ms",
+    missouri: "mo", montana: "mt", nebraska: "ne", nevada: "nv", "new hampshire": "nh", "new jersey": "nj",
+    "new mexico": "nm", "new york": "ny", "north carolina": "nc", "north dakota": "nd", ohio: "oh", oklahoma: "ok",
+    oregon: "or", pennsylvania: "pa", "rhode island": "ri", "south carolina": "sc", "south dakota": "sd",
+    tennessee: "tn", texas: "tx", utah: "ut", vermont: "vt", virginia: "va", washington: "wa",
+    "west virginia": "wv", wisconsin: "wi", wyoming: "wy", "puerto rico": "pr" };
+
+  // A ZIP ("34951") or "City, State[, USA]" -> zippopotam.us lookup path.
+  function placePath(place) {
+    const p = String(place || "").trim();
+    if (/^\d{5}$/.test(p)) return p;
+    const [city, state] = p.split(",").map((x) => x.trim().toLowerCase());
+    const st = state && (STATES[state] || (/^[a-z]{2}$/.test(state) ? state : null));
+    return city && st ? `${st}/${encodeURIComponent(city)}` : null;
+  }
+
+  // Place -> lat/lon with a local cache, then straight-line miles.
+  async function placeLatLon(place) {
+    const path = placePath(place);
+    if (!path) return null;
     const { zipCache = {} } = await chrome.storage.local.get("zipCache");
-    if (zipCache[zip]) return zipCache[zip];
+    if (zipCache[path]) return zipCache[path];
     try {
-      const r = await fetch(`https://api.zippopotam.us/us/${zip}`);
+      const r = await fetch(`https://api.zippopotam.us/us/${path}`);
       if (!r.ok) return null;
       const p = (await r.json()).places[0];
-      zipCache[zip] = { lat: +p.latitude, lon: +p.longitude };
+      zipCache[path] = { lat: +p.latitude, lon: +p.longitude };
       await chrome.storage.local.set({ zipCache });
-      return zipCache[zip];
+      return zipCache[path];
     } catch { return null; }
   }
 
-  async function milesBetween(zipA, zipB) {
-    const [a, b] = await Promise.all([zipLatLon(zipA), zipLatLon(zipB)]);
+  // Each argument is a ZIP or a "City, State" string.
+  async function milesBetween(placeA, placeB) {
+    const [a, b] = await Promise.all([placeLatLon(placeA), placeLatLon(placeB)]);
     if (!a || !b) return null;
     const R = 3958.8, rad = (x) => (x * Math.PI) / 180;
     const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);

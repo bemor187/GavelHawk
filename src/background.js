@@ -91,7 +91,7 @@ async function refreshWatchlist() {
       location: d.location || it.location, zip: d.zip || it.zip,
       highBidder: d.highBidder, pickupOnly: d.pickupOnly, lastChecked: Date.now()
     });
-    if (it.zip && it.miles == null) it.miles = await milesBetween(s.homeZip, it.zip);
+    if ((it.zip || it.location) && it.miles == null) it.miles = await milesBetween(s.homeZip, it.zip || it.location);
 
     const outbid = it.myBid && it.price > it.myBid && !it.highBidder;
     if (outbid && prev.alertedOutbidAt !== it.price) {
@@ -125,8 +125,8 @@ async function checkSearches(onlyId) {
       seen.add(key);
       if (srch.maxPrice && r.price != null && r.price > srch.maxPrice) continue;
       if (s.hidePickupOnly && r.pickupOnly) continue;
-      if (s.hideTooFar && r.zip) {
-        const mi = await milesBetween(s.homeZip, r.zip);
+      if (s.hideTooFar && (r.zip || r.location)) {
+        const mi = await milesBetween(s.homeZip, r.zip || r.location);
         if (mi != null && mi > s.maxMiles) continue;
       }
       fresh.push(r);
